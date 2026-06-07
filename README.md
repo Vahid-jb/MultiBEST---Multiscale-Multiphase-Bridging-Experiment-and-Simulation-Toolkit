@@ -19,3 +19,5 @@ This architecture allows users to:
 - Seamlessly move between atomistic and continuum scales within a single, consistent workflow
 
 MultiBEST integrates all required stages into one toolkit, from image processing to the final atomistic model in a suitable format for atomistic simulations, including reactive and classical molecular dynamics as well as spin‑lattice dynamics, and to representative continuum models with explicit grain‑boundary regions. The software is designed to run efficiently on both standard workstations and HPC systems, enabling anything from rapid prototyping to large‑scale, high‑fidelity simulations. The architecture allows each computational module to run either independently from the command line or through the central GUI, and includes a local HTTP server that delivers static HTML documentation to the browser for convenient offline use.
+
+<img width="2494" height="1621" alt="Figure_1" src="https://github.com/user-attachments/assets/3f45ed76-b4a8-4318-b333-cc406c074b51" />
