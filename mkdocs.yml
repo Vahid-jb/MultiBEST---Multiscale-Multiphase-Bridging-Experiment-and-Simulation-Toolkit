@@ -1,0 +1,64 @@
+site_name: MultiBEST Documentation
+site_description: Help pages for the MultiBEST GUI modules
+docs_dir: docs/modules
+site_dir: docs_site/site
+use_directory_urls: false
+
+theme:
+  name: material
+  palette:
+    - scheme: slate
+      primary: indigo
+      accent: light blue
+      toggle:
+        icon: material/brightness-4
+        name: Switch to light mode
+    - scheme: default
+      primary: indigo
+      accent: light blue
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+  features:
+    - navigation.tabs
+    - navigation.top
+    - search.highlight
+    - search.suggest
+    - content.code.copy
+
+plugins:
+  - search:
+      lang: en
+  - minify:
+      minify_html: true
+      minify_js: true
+      minify_css: true
+
+markdown_extensions:
+  - admonition
+  - attr_list
+  - tables
+  - toc:
+      permalink: true
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - pymdownx.superfences
+  - pymdownx.tabbed:
+      alternate_style: true
+  - pymdownx.details
+  - pymdownx.arithmatex:
+      generic: true
+
+extra_javascript:
+  - https://unpkg.com/mathjax@3/es5/tex-mml-chtml.js
+
+nav:
+  - Home: index.md
+  - Image Processing: Image_Processing_Documentation.md
+  - Image to Mesh: Image_to_Mesh_Documentation.md
+  - Mesh Modification: Mesh_Modification_Documentation.md
+  - Mesh To Atomistic: Mesh_to_Atomistic_Documentation.md
+  - Relaxation: Relaxation_Module_Documentation.md
+  - EBSD To Atomistic / Mesh: EBSD_Atomistic_Documentation.md
+  - Atomistic To Continuum: Atomistic_to_Continuum_Documentation.md
+  - Input Convertor: Input_Convertor_Docs.md
