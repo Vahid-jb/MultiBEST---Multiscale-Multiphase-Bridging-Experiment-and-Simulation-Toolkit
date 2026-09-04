@@ -49,20 +49,23 @@ Per-module guides live under [docs/modules](docs/modules/index.md).
 
 ## Getting Started
 
-Pre-built application binaries will be published on the
-[Releases](../../releases) page. Download the archive for your platform, extract
-it, and launch the `MultiBEST` executable. Each computational module can also be
-run standalone from a terminal with an input file.
+Download the archive for your platform — Windows or Ubuntu/Linux — from the
+[Releases](../../releases) page, extract it, and launch the `MultiBEST`
+executable directly. No build step and no Python environment required.
 
-To run from source (Python 3.12+):
+### GUI and Command-Line Use
 
-```sh
-pip install .
-python -m multibest.gui.main_ui
+MultiBEST supports both graphical user interface (GUI) and command-line interface (CLI) workflows.
+
+For most users, we recommend using the provided binaries through the GUI. After selecting the desired module, setting the parameters, and clicking Run, MultiBEST automatically saves the corresponding input file in `.txt` format in the selected working directory.
+
+Each module can also be executed independently from the command line using its saved input file. For example, in the Linux version:
+
+```bash
+EBSD_Atomistic input.txt
 ```
 
-Several modules rely on external scientific packages (OVITO, DREAM.3D-NX, xTB,
-Blender); a conda-based environment is the simplest way to provide them.
+Users may also create or edit input files manually when required. The CLI workflow is particularly useful for high-throughput calculations, constructing automated workflows, and running MultiBEST modules on computing clusters.
 
 ## Documentation
 
@@ -74,6 +77,10 @@ guides, or browse [docs/modules](docs/modules/index.md).
 The [`examples/`](examples/) directory contains sample inputs for the modules.
 See [`examples/DATA_SOURCES.md`](examples/DATA_SOURCES.md) for provenance and
 licensing.
+
+## Contributors
+
+MultiBEST is built by the people listed in [`CONTRIBUTORS.md`](CONTRIBUTORS.md).
 
 ## License
 

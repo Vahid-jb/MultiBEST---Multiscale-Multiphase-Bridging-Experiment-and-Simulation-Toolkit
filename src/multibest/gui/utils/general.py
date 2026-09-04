@@ -75,6 +75,25 @@ def get_script_path(*parts: str) -> str:
     return os.path.join(exe_dir, stem)
 
 
+def get_source_script_path(*parts: str) -> str:
+    """Build an absolute path to a script shipped as plain ``.py`` source.
+
+    Unlike :func:`get_script_path`, scripts resolved here are *not* frozen
+    into sibling binaries — they are bundled as data files and executed by an
+    external Python interpreter (e.g. the DREAM3D-NX environment, whose
+    dependencies must not be redistributed inside the bundle).
+
+    In development mode this is identical to :func:`get_script_path`. In
+    frozen mode the relative ``..`` segments are dropped and the path is
+    resolved inside the bundle's data directory (``sys._MEIPASS``).
+    """
+    if not getattr(sys, "frozen", False):
+        return os.path.join(get_base_dir(), *parts)
+
+    clean_parts = [part for part in parts if part not in ("..", ".")]
+    return os.path.join(sys._MEIPASS, *clean_parts)  # type: ignore[attr-defined]
+
+
 def _get_python_interpreter() -> str:
     """Return the path to a Python interpreter for running scripts.
 

@@ -21,7 +21,6 @@ import multiprocessing
 import os
 import sys
 import threading
-import webbrowser
 from dataclasses import dataclass, field
 from string import Template
 
@@ -56,6 +55,7 @@ from multibest.gui.relaxation.window import RelaxationWindow
 from multibest.gui.utils.general import get_base_dir
 from multibest.gui.utils.ovito_scene import clear_ovito_scene
 from multibest.gui.utils.theme import QLEMENTINE_DARK, apply_dark_theme, decorate_action_button, icon_for_action
+from multibest.utils.host_env import open_url
 
 
 def _ui_font(size: int) -> QFont:
@@ -542,14 +542,14 @@ class MultiBESTMainWindow(QMainWindow):
             return
 
         base_url = f"http://localhost:{self.doc_server.port}"
-        webbrowser.open(f"{base_url}/index.html")
+        open_url(f"{base_url}/index.html")
 
     def open_module_documentation(self, module_index: int) -> None:
         if not self._start_documentation_server():
             return
 
         base_url = f"http://localhost:{self.doc_server.port}"
-        webbrowser.open(f"{base_url}/{self._get_module_doc_path(module_index)}")
+        open_url(f"{base_url}/{self._get_module_doc_path(module_index)}")
 
     def _add_module_help_button(self, control_widget: QWidget, module_index: int) -> None:
         if isinstance(control_widget, QTabWidget):

@@ -41,13 +41,14 @@ hosted). Download them from the DREAM.3D tutorial link in `EBSD-source.txt`.
 
 | File | Source | License |
 |------|--------|---------|
-| `test.jpg`, `ech_robinet_2_brut_008_scale.jpg` | Example micrographs (Git LFS) | See repository owner |
+| `raw_micrograph.jpg` | Raw, unprocessed example micrograph (Git LFS) | See repository owner |
+| `processed_micrograph.jpg` | Thresholded/processed example micrograph (Git LFS) | See repository owner |
 
 ## Provenance
 
 These example datasets were imported from
 [Vahid-jb/MultiBEST](https://github.com/Vahid-jb/MultiBEST---Multiscale-Multiphase-Bridging-Experiment-and-Simulation-Toolkit)
-(MIT-licensed). The Materials Project CIF files retain CC-BY-4.0 as noted above.
+(GPL-3.0). The Materials Project CIF files retain CC-BY-4.0 as noted above.
 
 If you are the author of any asset marked "See repository owner" and wish to add
 a specific license or attribution, please open an issue or PR.

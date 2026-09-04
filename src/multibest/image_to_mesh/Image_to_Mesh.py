@@ -11,6 +11,11 @@ Usage (example):
 blender --background --python ./Image_to_Mesh.py -- \
     --image ./micro-clean.png --vertices fine --depth 0.25 \
     --format STL --outdir . --guest --bulk --base
+
+Every parameter can instead be read from a 'key = value' input file (the file the
+GUI writes into the output directory):
+
+blender --background --python ./Image_to_Mesh.py -- --input-file ./input_image_to_mesh.txt
 """
 
 import argparse
@@ -34,6 +39,10 @@ if "--" in sys.argv:
     script_argv = sys.argv[arg_start:]
 else:
     script_argv = []
+
+# Input-file keys mapped onto the option of the same name.
+VALUE_INPUT_KEYS = ("image", "vertices", "depth", "format", "outdir")
+PHASE_INPUT_KEYS = ("guest", "base", "bulk")
 
 
 def cleanup_scene():
@@ -249,8 +258,14 @@ def align_phases_to_bulk(bulk_name="Bulk_Phase"):
             print(f"{obj.name} already aligned (delta {delta:.6f})")
 
 
-if __name__ == "__main__":
+def build_parser():
+    """Build the command-line parser for this script."""
     parser = argparse.ArgumentParser(description="Convert 2D image to 3D mesh in Blender")
+    parser.add_argument(
+        "--input-file",
+        type=str,
+        help="Parameter file with 'key = value' lines; overrides every other argument when given.",
+    )
     parser.add_argument("--image", type=str, help="Full path to reference image (PNG/JPG)")
     parser.add_argument("--depth", type=float, default=0.25, help="Extrusion depth (default: 0.25)")
     parser.add_argument(
@@ -267,8 +282,48 @@ if __name__ == "__main__":
     parser.add_argument("--guest", action="store_true", help="Generate Guest Phase mesh")
     parser.add_argument("--base", action="store_true", help="Generate Base Phase mesh")
     parser.add_argument("--bulk", action="store_true", help="Generate Bulk Phase mesh")
+    return parser
 
-    args = parser.parse_args(script_argv)
+
+def parse_input_file(input_file):
+    """Parse ``key = value`` parameters from an input text file."""
+    params = {}
+    with open(input_file, encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if not line or line.startswith("#"):
+                continue
+            if "=" in line:
+                key, value = line.split("=", 1)
+                params[key.strip()] = value.strip()
+    return params
+
+
+def argv_from_input_file(input_file):
+    """Translate an input file written by the GUI into CLI arguments."""
+    params = parse_input_file(input_file)
+    argv = []
+    for key in VALUE_INPUT_KEYS:
+        value = params.get(key, "").strip()
+        if value:
+            argv.extend([f"--{key}", value])
+    for key in PHASE_INPUT_KEYS:
+        if params.get(key, "").strip().lower() in {"1", "true", "yes", "on"}:
+            argv.append(f"--{key}")
+    return argv
+
+
+def parse_args(argv=None):
+    """Parse arguments from *argv*, or from the input file it points at."""
+    parser = build_parser()
+    args = parser.parse_args(script_argv if argv is None else argv)
+    if args.input_file:
+        args = parser.parse_args(argv_from_input_file(args.input_file))
+    return args
+
+
+if __name__ == "__main__":
+    args = parse_args()
 
     # If no phase flags are specified, generate all phases (backward compatibility)
     if not (args.guest or args.base or args.bulk):

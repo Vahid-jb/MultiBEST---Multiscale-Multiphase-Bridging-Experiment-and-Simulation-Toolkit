@@ -28,6 +28,22 @@ If starting with a single 2D EBSD scan (e.g., .ctf), replicate it to create a ps
 
 ### Step 1: EBSD Processing & Meshing
 
+> **DREAM3D-NX environment required.** The cleaning pipeline runs in a separate
+> Python environment providing the `simplnx` and `orientationanalysis` modules
+> (DREAM3D-NX by BlueQuartz Software). DREAM3D-NX is not redistributable with
+> MultiBEST, so it is not part of the installed application. Use the
+> **DREAM3D-NX environment** controls at the top of the *Stage 1* tab:
+>
+> - **Install** — one-time managed setup: MultiBEST downloads micromamba
+>   (BSD-3-Clause) and installs the free `dream3dnx` package from BlueQuartz
+>   Software's own conda channel into your user data directory (~2 GB,
+>   network access required).
+> - **Browse / Test** — alternatively, select the Python interpreter of an
+>   existing DREAM3D-NX/conda environment and verify it works.
+>
+> The selection is saved and auto-detected on the next start. The
+> `MULTIBEST_DREAM3D_PYTHON` environment variable overrides it.
+
 This is the core processing step. It:
 1.  Imports EBSD data (ANG/CTF/H5EBSD).
 2.  Runs a 12-filter cleaning pipeline (detailed below) including thresholding, alignment, segmentation, twin merging, and morphological cleaning.

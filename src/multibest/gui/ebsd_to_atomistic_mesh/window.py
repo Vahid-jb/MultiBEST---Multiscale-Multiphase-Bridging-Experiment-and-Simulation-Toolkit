@@ -15,7 +15,6 @@ from __future__ import annotations
 import os
 import re
 from dataclasses import dataclass
-from importlib.util import find_spec
 from pathlib import Path
 
 os.environ["OVITO_GUI_MODE"] = "1"
@@ -23,7 +22,7 @@ os.environ["OVITO_GUI_MODE"] = "1"
 from ovito.gui import create_qwidget
 from ovito.io import import_file
 from ovito.vis import Viewport
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QSettings, Qt
 from PySide6.QtWidgets import (
     QApplication,
     QCheckBox,
@@ -34,6 +33,8 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QLineEdit,
+    QMessageBox,
+    QProgressDialog,
     QPushButton,
     QScrollArea,
     QTabWidget,
@@ -41,9 +42,15 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from multibest.gui.utils import stl_preview
+from multibest.gui.utils import dream3d_controls, stl_preview
 from multibest.gui.utils.base_window import BaseModuleWindow
-from multibest.gui.utils.general import browse_directory, browse_file, create_file, get_script_path
+from multibest.gui.utils.general import (
+    browse_directory,
+    browse_file,
+    create_file,
+    get_script_path,
+    get_source_script_path,
+)
 from multibest.gui.utils.mesh_viewer import MeshViewer
 from multibest.gui.utils.ovito_scene import clear_ovito_scene
 from multibest.gui.utils.theme import (
@@ -61,6 +68,7 @@ from multibest.gui.utils.theme import (
     make_primary_button,
     make_stop_button,
 )
+from multibest.utils.dream3d import Dream3DError, discover_dream3d_python, install_dream3d_env
 
 EBSD_FILE_FILTER = "EBSD files (*.ang *.ctf *.h5ebsd *.h5);;All files (*)"
 TEXT_FILE_FILTER = "Text files (*.txt *.dat *.csv);;All files (*)"
@@ -77,10 +85,15 @@ H5EBSD_FORMAT_OPTIONS: tuple[tuple[str, int, str], ...] = (
     (".ang", 0, ".ang"),
     (".ctf", 1, ".ctf"),
 )
+DREAM3D_SETTINGS_KEY = "ebsd_to_atomistic_mesh/dream3d_python"
 DREAM3DNX_MISSING_MESSAGE = (
-    "DREAM3D-NX/SIMPLNX is required for EBSD preparation. Please install DREAM3D-NX "
-    "and make sure the Python modules 'simplnx' and 'orientationanalysis' are available "
-    "in the Python environment used by MultiBEST."
+    "DREAM3D-NX/SIMPLNX is required for EBSD preparation, but no Python environment "
+    "providing the 'simplnx' and 'orientationanalysis' modules was found. Use the "
+    "'DREAM3D-NX environment' controls to Install a managed environment, or Browse "
+    "to an existing DREAM3D-NX Python interpreter."
+)
+DREAM3D_STATUS_MISSING_MESSAGE = (
+    "Not found. Required only for EBSD preparation — use Install to set it up, or select an existing interpreter."
 )
 
 
@@ -103,6 +116,7 @@ class EbsdToAtomisticMeshWindow(BaseModuleWindow):
         self.resize(1100, 760)
 
         self.phase_widgets: list[PhaseWidgets] = []
+        self._dream3d_python = ""
         self._mesh_preview_paths: list[str] = []
         self._last_mesh_preview_path = ""
         self._atomistic_output_candidates: list[str] = []
@@ -158,6 +172,7 @@ class EbsdToAtomisticMeshWindow(BaseModuleWindow):
         layout.setContentsMargins(10, 10, 10, 10)
         layout.setSpacing(12)
 
+        layout.addWidget(self._build_dream3d_group())
         layout.addWidget(self._build_h5_group())
         self.ebsd_extrusion_group = self._build_initial_input_group()
         self.raw_ebsd_group = self._build_raw_ebsd_group()
@@ -374,6 +389,36 @@ class EbsdToAtomisticMeshWindow(BaseModuleWindow):
         ):
             layout.addRow(label, widget)
         return group
+
+    def _build_dream3d_group(self) -> QGroupBox:
+        group = dream3d_controls.build_dream3d_group(self, DREAM3D_SETTINGS_KEY)
+        self._refresh_dream3d_status()
+        return group
+
+    def _settings(self) -> QSettings:
+        return QSettings("MultiBEST", "MultiBEST")
+
+    def _save_dream3d_path(self) -> None:
+        dream3d_controls.save_dream3d_path(self, DREAM3D_SETTINGS_KEY)
+
+    def _browse_dream3d_python(self) -> None:
+        dream3d_controls.browse_dream3d_python(self, QFileDialog.getOpenFileName)
+
+    def _refresh_dream3d_status(self) -> None:
+        dream3d_controls.refresh_dream3d_status(self, DREAM3D_STATUS_MISSING_MESSAGE, discover_dream3d_python)
+
+    def _test_dream3d_python(self) -> None:
+        dream3d_controls.test_dream3d_python(self, discover_dream3d_python)
+
+    def _install_dream3d_env(self) -> None:
+        dream3d_controls.install_dream3d_env(
+            self,
+            install_dream3d_env,
+            Dream3DError,
+            QMessageBox,
+            QProgressDialog,
+            QApplication.processEvents,
+        )
 
     def _build_ebsd_output_group(self) -> QGroupBox:
         group = QGroupBox("EBSD outputs")
@@ -883,7 +928,7 @@ class EbsdToAtomisticMeshWindow(BaseModuleWindow):
 
         params = self._collect_ebsd_processing()
         script_path, args, output_dir, label = self._prepare_ebsd_backend_run(params)
-        if not script_path:
+        if script_path is None or args is None or label is None:
             return
 
         self._set_running(True)
@@ -892,7 +937,10 @@ class EbsdToAtomisticMeshWindow(BaseModuleWindow):
             label,
             lambda: self._refresh_stl_visualization(stl_output_dir, DEFAULT_STL_PREFIX),
         )
-        self.runner.start(script_path, args=args, cwd=output_dir)
+        # EBSD preparation depends on simplnx (DREAM3D-NX), which is not
+        # redistributable with MultiBEST — run the script with the external
+        # DREAM3D-NX interpreter resolved during validation.
+        self.runner.start_program(self._dream3d_python, args=["-u", script_path, *args], cwd=output_dir)
         self.mesh_viz_label.setText(f"3D view of the generated mesh\nRunning: {label}")
 
     def _run_ebsd_replication(self) -> None:
@@ -1091,7 +1139,7 @@ class EbsdToAtomisticMeshWindow(BaseModuleWindow):
             return None, None, None, None
 
         param_file = self._write_ebsd_input_file(output_dir, params)
-        script_path = get_script_path("..", "ebsd_atomistic", "EBSD_Atomistic.py")
+        script_path = get_source_script_path("..", "ebsd_atomistic", "EBSD_Atomistic.py")
         return script_path, [param_file], output_dir, "EBSD preparation"
 
     def _ebsd_output_dir(self, params: dict) -> str:
@@ -1135,13 +1183,24 @@ class EbsdToAtomisticMeshWindow(BaseModuleWindow):
                 return False
         return True
 
+    def _resolve_dream3d_python(self) -> str | None:
+        """Return a working external DREAM3D-NX interpreter, caching the result."""
+        saved = self.dream3d_python.text().strip()
+        cached = self._dream3d_python
+        if cached and (not saved or cached == saved) and os.path.isfile(cached):
+            return cached
+
+        found = discover_dream3d_python(saved)
+        if not found:
+            return None
+        self._dream3d_python = str(found)
+        self.dream3d_python.setText(str(found))
+        self._save_dream3d_path()
+        return self._dream3d_python
+
     def _validate_dream3dnx_runtime(self) -> bool:
-        missing_modules = [module for module in ("simplnx", "orientationanalysis") if find_spec(module) is None]
-        if missing_modules:
-            self.logger.log_message(
-                "ERROR",
-                f"{DREAM3DNX_MISSING_MESSAGE}\nMissing modules: {', '.join(missing_modules)}",
-            )
+        if self._resolve_dream3d_python() is None:
+            self.logger.log_message("ERROR", DREAM3DNX_MISSING_MESSAGE)
             return False
         return True
 

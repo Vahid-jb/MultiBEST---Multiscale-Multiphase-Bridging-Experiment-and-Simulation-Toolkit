@@ -17,7 +17,7 @@ package directory inside the bundle.
 | Component | License | Notes |
 |-----------|---------|-------|
 | PyInstaller bootloader | GPL-2.0 **with bootloader exception** | Exception permits distributing the frozen app under any license. |
-| OVITO (PyPI `ovito`) | MIT | The MIT PyPI module — **not** the proprietary `conda.ovito.org` OVITO Pro build. |
+| OVITO (PyPI `ovito`) | MIT | The MIT PyPI module — **not** the proprietary `conda.ovito.org` OVITO Pro build. Bundles `libcudart.so.12` (see the CUDA / NVIDIA note). |
 | PySide6 (Qt for Python) | LGPL-3.0 | Dynamically linked. |
 | xtb / xtb-python | LGPL-3.0-or-later | Includes GFN parameter data files. |
 | VTK | BSD-3-Clause | |
@@ -27,7 +27,9 @@ package directory inside the bundle.
 | qtawesome | MIT | Bundles Font Awesome Free — icons CC-BY-4.0, fonts SIL OFL-1.1. |
 | oneTBB | Apache-2.0 | See Apache-2.0 NOTICE requirements. |
 | PyTorch (if present, via SevenNet) | BSD-3-Clause | CPU build only; see CUDA note below. |
-| NumPy, SciPy, Matplotlib, Pillow, ASE, pandas, h5py, trimesh, rtree, periodictable, pymeshfix, scikit-image, opencv-python-headless, and other Python dependencies | BSD-3-Clause / MIT / PSF / HPND (permissive) | Reproduced under their permissive terms. |
+| ASE (Atomic Simulation Environment) | LGPL-2.1-or-later | Dynamically linked as a Python dependency. |
+| pymeshfix | AGPL-3.0 | Wraps MeshFix (IMATI-GE/CNR), dual-licensed GPL-3.0-or-later/commercial. Taken under the GPL path here; combines with GPL-3.0-or-later per GPLv3 §13. |
+| NumPy, SciPy, Matplotlib, Pillow, pandas, h5py, trimesh, rtree, periodictable, scikit-image, opencv-python-headless, and other Python dependencies | BSD-3-Clause / MIT / PSF / HPND (permissive) | Reproduced under their permissive terms. |
 
 ## Blender (bundled executable)
 
@@ -55,9 +57,18 @@ at <https://www.gnu.org/licenses/>.
 
 ## CUDA / NVIDIA note
 
-The redistributable bundle must ship **CPU-only** PyTorch. NVIDIA CUDA runtime
-libraries (`libcudnn*`, `libcu*`, `nvidia-*` wheels) carry the proprietary NVIDIA
-Software License and are **not** included in / redistributed with this binary.
+The redistributable bundle ships **CPU-only** PyTorch. NVIDIA CUDA libraries
+(`libcudnn*`, `libcublas*`, `nvidia-*` wheels) carry the proprietary NVIDIA
+Software License and are **not** included, with one disclosed exception:
+
+- **`libcudart.so.12` (NVIDIA CUDA Runtime)** is redistributed, at
+  `_internal/ovito/plugins/libcudart.so.12` (and a symlink to it at
+  `_internal/`). It ships inside the MIT-licensed OVITO PyPI wheel and is a
+  hard `NEEDED` dependency of `ovito_bindings.so` — it is not `dlopen`'d, so it
+  cannot be removed without removing OVITO. NVIDIA's CUDA EULA permits
+  redistributing the CUDA runtime as part of an application. The license gate
+  (`scripts/check_licenses.py`) exempts this one path and continues to fail on
+  every other CUDA library anywhere in the bundle.
 
 ## Components intentionally excluded from the redistributable binary
 
@@ -66,5 +77,23 @@ bundled in published release binaries:
 
 - **Intel MKL** (`libmkl_*`, `libiomp5`) — Intel Simplified Software License
   (non-free). MultiBEST uses an open BLAS/LAPACK (OpenBLAS) instead.
-- **DREAM.3D-NX** proprietary binaries (`dream3dnx` / `DREAM3DNX` / `nxrunner` /
-  `libNX*`) from the `bluequartzsoftware` channel — proprietary EULA.
+- **DREAM.3D-NX / simplnx** (`dream3dnx` / `DREAM3DNX` / `nxrunner` / `libNX*` /
+  `libsimplnx*` / `*.simplnx` / `libEbsdLib*`) — the conda binaries from the
+  `bluequartzsoftware` channel carry a proprietary EULA, and the simplnx
+  sources are dual-licensed AGPL-3.0/commercial. See the next section for how
+  the EBSD workflow uses DREAM3D-NX without bundling it.
+
+## DREAM3D-NX (external, user-installed environment)
+
+The EBSD preparation step requires the `simplnx` and `orientationanalysis`
+Python modules from **DREAM3D-NX** (BlueQuartz Software). These are **never
+bundled**. Instead, MultiBEST runs the EBSD scripts as a **separate process**
+in an external Python environment on the user's machine — either one the user
+already has, or a managed environment that MultiBEST can create **at the
+user's explicit request**: it downloads **micromamba** (BSD-3-Clause,
+<https://github.com/mamba-org/mamba>) and installs the free `dream3dnx`
+package directly from BlueQuartz Software's own conda channel into the user's
+MultiBEST data directory. DREAM3D-NX remains governed by BlueQuartz Software's
+own license terms; it is obtained by the user from BlueQuartz and is not part
+of, nor redistributed with, MultiBEST. Running it as a separate program is
+*mere aggregation* under the GPL.

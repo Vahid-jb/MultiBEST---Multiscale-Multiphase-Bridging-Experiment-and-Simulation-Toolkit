@@ -173,6 +173,27 @@ class BaseModuleWindow(QMainWindow):
     # Write-params-and-run helper
     # ------------------------------------------------------------------
 
+    def _write_param_file(self, param_file: str, params: dict) -> str:
+        """Write *params* as ``key = value`` lines to *param_file*.
+
+        Parameters
+        ----------
+        param_file:
+            Absolute path to the parameter file to write.
+        params:
+            Key-value pairs written as ``key = value`` lines.
+
+        Returns
+        -------
+        str
+            The path that was written, so callers can pass it straight on.
+        """
+        self.logger.log_message("INFO", f"Writing parameter file: {param_file}")
+        with open(param_file, "w", encoding="utf-8") as f:
+            for k, v in params.items():
+                f.write(f"{k} = {v}\n")
+        return param_file
+
     def _write_and_run(
         self,
         param_file: str,
@@ -203,10 +224,7 @@ class BaseModuleWindow(QMainWindow):
         """
         from multibest.gui.utils.general import get_script_path
 
-        self.logger.log_message("INFO", f"Writing parameter file: {param_file}")
-        with open(param_file, "w", encoding="utf-8") as f:
-            for k, v in params.items():
-                f.write(f"{k} = {v}\n")
+        self._write_param_file(param_file, params)
 
         self._set_running(True)
         self.runner.on_finished_cb = on_finished

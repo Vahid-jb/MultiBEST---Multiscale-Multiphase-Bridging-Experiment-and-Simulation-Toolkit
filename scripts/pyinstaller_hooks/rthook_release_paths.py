@@ -1,3 +1,7 @@
+# SPDX-FileCopyrightText: 2026 bright-ideas-clan
+#
+# SPDX-License-Identifier: GPL-3.0-or-later
+
 """Runtime environment fixes for bundled helper executables."""
 
 from __future__ import annotations
@@ -5,6 +9,8 @@ from __future__ import annotations
 import os
 import sys
 from pathlib import Path
+
+from multibest.utils.certificates import configure_ssl_cert_env
 
 
 def _prepend_path(path: Path) -> None:
@@ -25,3 +31,8 @@ for candidate in (bundle_internal, bundle_internal / "bin", bundle_root, bundle_
 
 for candidate in (bundle_internal / "share" / "xtb", bundle_root / "share" / "xtb"):
     _prepend_xtb_path(candidate)
+
+# The bundled conda OpenSSL looks for its CA store under the build environment's
+# prefix, which does not exist on a user's machine, so every HTTPS request fails
+# with CERTIFICATE_VERIFY_FAILED until SSL_CERT_FILE points somewhere real.
+configure_ssl_cert_env()

@@ -40,15 +40,21 @@ function Find-CondaManager {
 }
 
 function Invoke-Checked {
-    param(
-        [Parameter(Mandatory = $true)]
-        [string] $Program,
+    # Intentionally a *simple* function (no param() block). Declaring
+    # [Parameter()] attributes would make this an advanced function, which
+    # inherits PowerShell's common parameters (-ErrorAction, -ErrorVariable, ...).
+    # PowerShell would then try to bind pass-through native flags such as pip's
+    # `-e` as an ambiguous prefix of those and abort before the argument ever
+    # reaches the command. Collecting everything through $args keeps native
+    # flags literal.
+    if ($args.Count -lt 1) {
+        throw "Invoke-Checked requires a program to run."
+    }
 
-        [Parameter(ValueFromRemainingArguments = $true)]
-        [string[]] $Arguments
-    )
+    $program = $args[0]
+    $arguments = @($args | Select-Object -Skip 1)
 
-    & $Program @Arguments
+    & $program @arguments
     if ($LASTEXITCODE -ne 0) {
         exit $LASTEXITCODE
     }

@@ -65,12 +65,68 @@ except Exception:
     HAS_XTB_PY = False
 
 
+class RelaxationIncompleteError(RuntimeError):
+    """The run produced output files, but one or more steps did not succeed."""
+
+
+class OptimizerStalledError(RuntimeError):
+    """The ASE optimizer stopped moving the structure before reaching ``fmax``."""
+
+
+class _AseProgressTracker:
+    """Observer that remembers the last evaluable geometry and detects a stalled optimizer.
+
+    FIRE with ``downhill_check`` halves its timestep every time a trial step raises the
+    energy.  On a rough potential energy surface the timestep can collapse until the
+    displacement underflows, after which the optimizer spins through its entire step
+    budget without moving an atom or calling the calculator.  Detecting that here keeps
+    a stalled run from masquerading as a long one.
+
+    Parameters
+    ----------
+    atoms : ase.Atoms
+        The structure being optimized, observed in place.
+    """
+
+    displacement_tolerance = 1e-8  # Å; below this the optimizer is not moving the structure
+    patience = 20  # consecutive motionless steps tolerated before giving up
+
+    def __init__(self, atoms):
+        self.atoms = atoms
+        self.last_evaluable = None
+        self._previous_positions = None
+        self._motionless_steps = 0
+
+    def __call__(self):
+        try:
+            forces = self.atoms.get_forces()
+        except Exception:
+            return
+        if np.all(np.isfinite(forces)):
+            self.last_evaluable = self.atoms.positions.copy()
+        self._check_for_stall()
+
+    def _check_for_stall(self):
+        positions = self.atoms.positions
+        if self._previous_positions is not None:
+            moved = np.abs(positions - self._previous_positions).max()
+            self._motionless_steps = 0 if moved > self.displacement_tolerance else self._motionless_steps + 1
+        self._previous_positions = positions.copy()
+        if self._motionless_steps >= self.patience:
+            raise OptimizerStalledError(
+                f"the optimizer stopped moving the structure for {self.patience} consecutive steps; "
+                "its timestep has collapsed and no further progress is possible"
+            )
+
+
 class GFN2xTBRelaxation:
     def __init__(self, input_file):
         self.input_file = input_file
         self.config = {}
         self.element_properties = {}
         self.restart_file = None  # Initialize restart_file
+        self.optimization_converged = False
+        self.mulliken_succeeded = True
 
     def parse_input_file(self):
         """Parse the input configuration file (robustly parse booleans, ints, floats)."""
@@ -706,14 +762,20 @@ class GFN2xTBRelaxation:
         return spins if int(round(sum(spins))) > 0 else None
 
     def save_mulliken_analysis(self, atoms, charge, uhf, output_base):
-        """Run xTB (CLI) to produce Mulliken/pop and save to file; robust retries and logging."""
+        """Run xTB (CLI) to produce Mulliken/pop and save to file; robust retries and logging.
+
+        Returns
+        -------
+        bool
+            ``True`` when the population report was written, ``False`` on any failure.
+        """
         print(f"🔬 Starting Mulliken analysis for {len(atoms)} atoms...")
 
         try:
             temp_xyz = self._write_temp_xyz_for_mulliken(atoms)
         except Exception as e:
             print(f"❌ Failed to write temporary structure: {e}")
-            return
+            return False
 
         try:
             cmd = self._build_mulliken_command(temp_xyz, charge, uhf)
@@ -736,16 +798,19 @@ class GFN2xTBRelaxation:
             self._write_mulliken_log(output_base, cmd, stdout, stderr)
             if rc != 0:
                 print(f"❌ xTB Mulliken analysis failed with return code {rc}")
-                return
+                return False
 
             charges, spins = self._mulliken_populations(stdout, atoms)
             totals = self._write_mulliken_report(output_base, atoms, charge, uhf, charges, spins)
             self._print_mulliken_summary(f"{output_base}_mulliken.txt", charges, spins, totals)
+            return True
 
         except subprocess.TimeoutExpired:
             print("❌ Mulliken analysis timed out")
+            return False
         except Exception as e:
             print(f"❌ Unexpected error in Mulliken analysis: {e}")
+            return False
         finally:
             self._cleanup_temp_files(temp_xyz)
 
@@ -766,8 +831,11 @@ class GFN2xTBRelaxation:
             "--pop",
             "--charge",
             str(charge),
+            # Must track the configured SCF limit: transition-metal oxides routinely need
+            # far more than a hundred cycles, and a short limit here fails the analysis of
+            # a structure the relaxation itself handled fine.
             "--iterations",
-            "100",
+            str(int(self.config.get("max_iterations", 250))),
             "--etemp",
             str(int(self.config.get("electronic_temperature", 1000))),
             "--acc",
@@ -873,7 +941,35 @@ class GFN2xTBRelaxation:
         out_path = self._write_final_structure(atoms)
         total_charge, total_spin = self._final_charge_spin(atoms)
         self._save_final_analysis(atoms, out_path, total_charge, total_spin)
-        print("🎉 GFN-xTB relaxation completed successfully!")
+        self._report_outcome(out_path)
+
+    def _report_outcome(self, out_path):
+        """Announce success only when every step actually succeeded.
+
+        Output files are written either way, so a caller that only wants the last
+        evaluable geometry still gets it; the exit status tells whether the numbers
+        in those files can be trusted.
+
+        Raises
+        ------
+        RelaxationIncompleteError
+            If the optimization did not converge or the population analysis failed.
+        """
+        problems = []
+        if not self.optimization_converged:
+            problems.append(f"the geometry optimization did not converge to fmax = {self.config.get('fmax', 0.02)}")
+        if not self.mulliken_succeeded:
+            problems.append("the Mulliken population analysis failed")
+
+        if not problems:
+            print("🎉 GFN-xTB relaxation completed successfully!")
+            return
+
+        raise RelaxationIncompleteError(
+            f"GFN-xTB relaxation finished with problems: {'; '.join(problems)}. "
+            f"The last evaluable structure was still written to {out_path}, "
+            "but its energies and forces are not converged results."
+        )
 
     def _prepared_atoms(self):
         inp = self.config["input"]
@@ -922,6 +1018,7 @@ class GFN2xTBRelaxation:
         opt_atoms, stdout, stderr, rc, _ = self._run_xtb_for_relaxation(atoms, total_charge, total_spin, restart_file)
         opt_atoms = self._validate_xtb_result(opt_atoms, atoms, rc)
         if opt_atoms is not None:
+            self.optimization_converged = True
             print("✅ xTB CLI optimization completed successfully.")
             return opt_atoms
 
@@ -981,6 +1078,7 @@ class GFN2xTBRelaxation:
             converged = self._run_ase_optimizer(atoms)
         except Exception as exc:
             raise RuntimeError(f"xTB ASE calculator failed: {exc}") from exc
+        self.optimization_converged = converged
         if converged:
             print("✅ ASE optimization converged.")
         else:
@@ -1005,6 +1103,7 @@ class GFN2xTBRelaxation:
             if stderr:
                 print(f"xTB error: {stderr}")
             raise RuntimeError("xTB CLI optimizer also failed")
+        self.optimization_converged = True
         print("✅ xTB CLI optimization completed as fallback.")
         return opt_atoms
 
@@ -1014,26 +1113,20 @@ class GFN2xTBRelaxation:
         else:
             opt = FIRE(atoms, dt=0.05, maxstep=0.05, dtmax=0.5, downhill_check=True)
 
-        last_evaluable = {}
-
-        def remember_evaluable_geometry():
-            try:
-                forces = atoms.get_forces()
-            except Exception:
-                return
-            if np.all(np.isfinite(forces)):
-                last_evaluable["positions"] = atoms.positions.copy()
-
-        remember_evaluable_geometry()
-        if "positions" not in last_evaluable:
+        tracker = _AseProgressTracker(atoms)
+        tracker()
+        if tracker.last_evaluable is None:
             raise RuntimeError("xTB could not evaluate the initial geometry")
         if hasattr(opt, "attach"):
-            opt.attach(remember_evaluable_geometry, interval=1)
+            opt.attach(tracker, interval=1)
 
         try:
             return bool(opt.run(fmax=float(self.config.get("fmax", 0.02)), steps=int(self.config.get("steps", 500))))
+        except OptimizerStalledError as exc:
+            print(f"⚠️  ASE optimization stopped early: {exc}")
+            return False
         except Exception as exc:
-            atoms.set_positions(last_evaluable["positions"])
+            atoms.set_positions(tracker.last_evaluable)
             if atoms.calc is not None and hasattr(atoms.calc, "reset"):
                 atoms.calc.reset()
             try:
@@ -1090,7 +1183,7 @@ class GFN2xTBRelaxation:
         charge_to_pass = int(round(total_charge))
         uhf_to_pass = int(round(total_spin))
         print(f"🔬 Running Mulliken analysis with charge={charge_to_pass}, uhf={uhf_to_pass}")
-        self.save_mulliken_analysis(atoms, charge_to_pass, uhf_to_pass, out_base)
+        self.mulliken_succeeded = bool(self.save_mulliken_analysis(atoms, charge_to_pass, uhf_to_pass, out_base))
 
         print("🔬 Calculating electronic properties...")
         self.save_electronic_properties(atoms, out_base)
@@ -1108,6 +1201,11 @@ def main():
     relaxer = GFN2xTBRelaxation(args.input_file)
     try:
         relaxer.relax_structure()
+    except RelaxationIncompleteError as e:
+        # An expected outcome, not a crash: report it plainly and fail the run so the
+        # caller does not treat unconverged numbers as results.
+        print(f"❌ {e}")
+        sys.exit(1)
     except Exception as e:
         print("Fatal error:", e)
         import traceback

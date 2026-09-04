@@ -30,7 +30,7 @@ from PySide6.QtWidgets import (
 
 from multibest.gui.utils import blender_controls
 from multibest.gui.utils.base_window import BaseModuleWindow
-from multibest.gui.utils.general import browse_directory, browse_file, create_file, get_script_path
+from multibest.gui.utils.general import browse_directory, browse_file, create_file
 from multibest.gui.utils.mesh_viewer import MeshViewer
 from multibest.gui.utils.theme import (
     NoWheelComboBox,
@@ -57,6 +57,7 @@ from multibest.utils.blender import (
 MESH_FILE_FILTER = "Mesh files (*.obj *.stl *.ply *.vtk *.vtp);;All files (*)"
 OUTPUT_MESH_FILE_FILTER = "Mesh files (*.obj *.stl *.ply);;All files (*)"
 BLENDER_SETTINGS_KEY = "mesh_modification/blender_exec"
+INPUT_FILE_NAME = "input_mesh_modification.txt"
 
 
 class MeshModificationWindow(BaseModuleWindow):
@@ -270,44 +271,15 @@ class MeshModificationWindow(BaseModuleWindow):
         self._generated_mesh_path = output_path
         self.logger.log_message("INFO", f"Mesh modification parameters: {params}")
 
-        self._set_running(True)
-        self.runner.on_finished_cb = self._make_finish_callback("Mesh modification", self._plot_mesh_modification)
-        script_path = get_script_path("..", "mesh_modification", "Mesh_Modification.py")
-        self.runner.start(script_path, args=self._build_mesh_modification_args(params), cwd=output_dir)
-
-    def _build_mesh_modification_args(self, params: dict[str, str | int | float | bool]) -> list[str]:
-        """Build CLI arguments for ``Mesh_Modification.py`` from UI parameters."""
-        args = [
-            "--refinement",
-            str(params["refinement"]),
-            "--start-voxel",
-            str(params["start_voxel"]),
-            "--step",
-            str(params["step"]),
-        ]
-        blender_exec = str(params.get("blender_exec") or "").strip()
-        if blender_exec:
-            args.extend(["--blender-exec", blender_exec])
-
-        if params["apply_refine"]:
-            args.append("--apply-refine")
-
-        args.extend(
-            [
-                str(params["mesh_file"]),
-                "--output",
-                str(params["output_file"]),
-                "--iterations",
-                str(params["iterations"]),
-                "--fill_hole_threshold",
-                str(int(round(float(params["fill_hole_threshold"])))),
-                "--smoothing",
-                str(params["smoothing"]),
-                "--smoothing-method",
-                str(params["smoothing_method"]).lower(),
-            ]
+        param_file = os.path.join(output_dir, INPUT_FILE_NAME)
+        self._write_and_run(
+            param_file,
+            params,
+            ("..", "mesh_modification", "Mesh_Modification.py"),
+            output_dir,
+            self._make_finish_callback("Mesh modification", self._plot_mesh_modification),
+            extra_args=["--input-file"],
         )
-        return args
 
     def _settings(self) -> QSettings:
         return QSettings("MultiBEST", "MultiBEST")

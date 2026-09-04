@@ -59,6 +59,8 @@ This module implements three distinct methodologies for dynamic iterative refine
 | `fill hole threshold` | Maximum size of holes (boundary edges) to fill automatically. | `120` |
 | `output` | Path for the final processed mesh file. | - |
 
+Every run writes these parameters to `input_mesh_modification.txt` in the output directory and the backend reads them from there, so a run can be repeated or edited outside the GUI with `Mesh_Modification.py --input-file input_mesh_modification.txt`.
+
 ---
 ## Notes
 The following libraries and specific modules are leveraged in this package:<br>

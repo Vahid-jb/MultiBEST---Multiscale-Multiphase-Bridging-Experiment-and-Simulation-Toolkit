@@ -255,6 +255,7 @@ release target="":
 
 [unix]
 _release-uv:
+    just docs
     UV_CACHE_DIR=/tmp/uv-cache uv run --no-sync --with pyinstaller pyinstaller --clean --noconfirm release.spec
     UV_CACHE_DIR=/tmp/uv-cache uv run --no-sync python -m multibest.tools.install_blender --destination dist/MultiBEST/blender
     python scripts/clear_execstack.py dist/MultiBEST/_internal/libpython*.so*
@@ -265,6 +266,7 @@ _release-uv:
 
 [unix]
 _release-conda:
+    just docs conda
     just _conda-run python -m PyInstaller --version || just _conda-run python -m pip install pyinstaller
     just _conda-run python -m PyInstaller --clean --noconfirm release.spec
     just _conda-run python -m multibest.tools.install_blender --destination dist/MultiBEST/blender
@@ -272,10 +274,22 @@ _release-conda:
 
 [windows]
 _release-conda:
-    just _conda-run python -m PyInstaller --version; if ($LASTEXITCODE -ne 0) { just _conda-run python -m pip install pyinstaller; if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE } }; just _conda-run python -m PyInstaller --clean --noconfirm release.spec; if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }; just _conda-run python -m multibest.tools.install_blender --destination dist/MultiBEST/blender
+    just docs conda; if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }; just _conda-run python -m PyInstaller --version; if ($LASTEXITCODE -ne 0) { just _conda-run python -m pip install pyinstaller; if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE } }; just _conda-run python -m PyInstaller --clean --noconfirm release.spec; if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }; just _conda-run python -m multibest.tools.install_blender --destination dist/MultiBEST/blender
 # Build/update the GUI help documentation site
-docs:
-    uv run --no-sync mkdocs build --strict
+[unix]
+docs target="":
+    @if [ "{{target}}" = "conda" ]; then \
+        just _conda-run mkdocs build --strict; \
+    elif [ -z "{{target}}" ]; then \
+        uv run --no-sync mkdocs build --strict; \
+    else \
+        echo "Unknown docs target '{{target}}'. Use 'just docs' or 'just docs conda'."; \
+        exit 2; \
+    fi
+
+[windows]
+docs target="":
+    @if ("{{target}}" -eq "conda") { just _conda-run mkdocs build --strict } elseif ("{{target}}" -eq "") { uv run --no-sync mkdocs build --strict } else { Write-Error "Unknown docs target '{{target}}'. Use 'just docs' or 'just docs conda'."; exit 2 }
 
 # Interactive commit with Commitizen
 commit:

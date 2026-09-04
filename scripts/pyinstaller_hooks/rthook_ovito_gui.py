@@ -1,3 +1,7 @@
+# SPDX-FileCopyrightText: 2026 bright-ideas-clan
+#
+# SPDX-License-Identifier: GPL-3.0-or-later
+
 """Initialize OVITO GUI helper functions in frozen applications."""
 
 import importlib

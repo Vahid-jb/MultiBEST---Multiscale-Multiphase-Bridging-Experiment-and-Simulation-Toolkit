@@ -47,6 +47,8 @@ The typical workflow for generating a 3D microstructure is as follows:
 | **Phases** | Guest: Generate the mesh for the black regions. <br>  Base: Generate the mesh for the white regions. <br> Bulk: Generate the solid bulk block. |
 | **Mesh Operators** | Rotate (degree) Displace (no unit) Scale. | `0` |- |
 
+Mesh generation writes its parameters to `input_image_to_mesh.txt` and the mesh operators write theirs to `input_rescale.txt`, both in the output directory. The backends read them from there, so a run can be repeated or edited outside the GUI with `Image_to_Mesh.py --input-file input_image_to_mesh.txt` or `rescale.py --input-file input_rescale.txt`.
+
 ---
 
 ## Notes

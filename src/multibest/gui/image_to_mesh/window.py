@@ -65,6 +65,8 @@ MESH_FILE_FILTER = "Mesh files (*.obj *.stl *.ply *.vtk *.vtp *.fbx);;All files 
 OUTPUT_MESH_FILE_FILTER = "Mesh files (*.obj *.stl *.ply);;All files (*)"
 BLENDER_SETTINGS_KEY = "image_to_mesh/blender_exec"
 GENERATED_MESH_TITLE = "Generated mesh"
+GENERATION_INPUT_FILE_NAME = "input_image_to_mesh.txt"
+RESCALE_INPUT_FILE_NAME = "input_rescale.txt"
 PHASE_FILE_STEMS = {
     "Guest": "Guest_Phase",
     "Base": "Base_Phase",
@@ -357,6 +359,10 @@ class ImageToMeshWindow(BaseModuleWindow):
             return
 
         script_path = self._blender_python_script_path()
+        param_file = self._write_param_file(
+            os.path.join(out_dir, GENERATION_INPUT_FILE_NAME),
+            self._generation_parameters(image_path, out_dir),
+        )
         args = [
             "--background",
             "--python-exit-code",
@@ -364,19 +370,9 @@ class ImageToMeshWindow(BaseModuleWindow):
             "--python",
             script_path,
             "--",
-            "--image",
-            image_path,
-            "--vertices",
-            self.vertices.currentData() or self.vertices.currentText(),
-            "--depth",
-            str(self.depth.value()),
-            "--format",
-            self.export_format.currentText(),
-            "--outdir",
-            out_dir,
+            "--input-file",
+            param_file,
         ]
-        for phase in self._selected_phases():
-            args.append(f"--{phase.lower()}")
         self._set_running(True)
         self.runner.on_finished_cb = self._on_generation_finished
         self.logger.log_message("INFO", f"Running Blender image-to-mesh: {blender_exec} {' '.join(args)}")
@@ -423,28 +419,41 @@ class ImageToMeshWindow(BaseModuleWindow):
             return
         self.output_mesh.setText(output_path)
 
-        args = [
-            "--input_mesh",
-            input_mesh,
-            "--scale_value",
-            str(self.scale_x.value()),
-            str(self.scale_y.value()),
-            str(self.scale_z.value()),
-            "--displace",
-            str(self.displace_x.value()),
-            str(self.displace_y.value()),
-            str(self.displace_z.value()),
-            "--output",
-            output_path,
-        ]
-        args.extend(["--rotate", *self._rotation_args()])
+        self._write_and_run(
+            os.path.join(output_dir, RESCALE_INPUT_FILE_NAME),
+            self._rescale_parameters(input_mesh, output_path),
+            ("..", "image_to_mesh", "rescale.py"),
+            output_dir,
+            self._make_finish_callback(operation_name, self._plot_exported_mesh),
+            extra_args=["--input-file"],
+        )
 
-        if not keep_running:
-            self._set_running(True)
-        self.runner.on_finished_cb = self._make_finish_callback(operation_name, self._plot_exported_mesh)
-        script_path = get_script_path("..", "image_to_mesh", "rescale.py")
-        self.logger.log_message("INFO", f"Running mesh operators: {script_path} {' '.join(args)}")
-        self.runner.start(script_path, args=args, cwd=output_dir)
+    # ------------------------------------------------------------------
+    # Input file parameters
+    # ------------------------------------------------------------------
+
+    def _generation_parameters(self, image_path: str, out_dir: str) -> dict[str, str | float | bool]:
+        """Return the parameters ``Image_to_Mesh.py`` reads for a generation run."""
+        selected = self._selected_phases()
+        params: dict[str, str | float | bool] = {
+            "image": image_path,
+            "vertices": self.vertices.currentData() or self.vertices.currentText(),
+            "depth": self.depth.value(),
+            "format": self.export_format.currentText(),
+            "outdir": out_dir,
+        }
+        params.update({phase: phase in selected for phase in ("bulk", "guest", "base")})
+        return params
+
+    def _rescale_parameters(self, input_mesh: str, output_path: str) -> dict[str, str]:
+        """Return the parameters ``rescale.py`` reads for a transform run."""
+        return {
+            "input_mesh": input_mesh,
+            "scale_value": f"{self.scale_x.value()} {self.scale_y.value()} {self.scale_z.value()}",
+            "displace": f"{self.displace_x.value()} {self.displace_y.value()} {self.displace_z.value()}",
+            "rotate": " ".join(self._rotation_args()),
+            "output": output_path,
+        }
 
     # ------------------------------------------------------------------
     # State helpers

@@ -10,6 +10,8 @@ Wrapper launcher that:
  - If --refinement is provided: runs blender (background) with your blender-refinement.py
    to produce a refined mesh file, then runs clean_mesh.py on that refined mesh.
  - If --refinement is NOT provided: directly runs clean_mesh.py on the original input.
+ - If --input-file is provided: reads every parameter from that 'key = value' file
+   (the file the GUI writes into the output directory) instead of the command line.
 
 IMPORTANT: This script does NOT modify clean_mesh.py or blender-refinement.py.
 It simply invokes them as subprocesses. Keep this file next to your originals.
@@ -31,6 +33,28 @@ if sys.platform == "win32":
 # Path to your original scripts (adjust if located elsewhere)
 CLEAN_MESH_SCRIPT = os.path.join(os.path.dirname(__file__), "clean_mesh.py")
 BLENDER_REFINEMENT_SCRIPT = os.path.join(os.path.dirname(__file__), "blender-refinement.py")
+
+
+def _rounded_int(value):
+    return str(int(round(float(value))))
+
+
+# Input-file keys mapped to the wrapper's own options, in command-line order.
+WRAPPER_INPUT_KEYS = (
+    ("refinement", "--refinement"),
+    ("start_voxel", "--start-voxel"),
+    ("step", "--step"),
+    ("blender_exec", "--blender-exec"),
+)
+
+# Input-file keys forwarded to clean_mesh.py, with the normalisation it expects.
+CLEAN_MESH_INPUT_KEYS = (
+    ("output_file", "--output", str),
+    ("iterations", "--iterations", str),
+    ("fill_hole_threshold", "--fill_hole_threshold", _rounded_int),
+    ("smoothing", "--smoothing", str),
+    ("smoothing_method", "--smoothing-method", str.lower),
+)
 
 
 def _bundled_script(filename):
@@ -172,9 +196,53 @@ def run_clean_mesh_on(input_path, extra_args):
     return proc
 
 
+def parse_input_file(input_file):
+    """Parse ``key = value`` parameters from an input text file."""
+    params = {}
+    with open(input_file, encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if not line or line.startswith("#"):
+                continue
+            if "=" in line:
+                key, value = line.split("=", 1)
+                params[key.strip()] = value.strip()
+    return params
+
+
+def _is_enabled(value):
+    return str(value).strip().lower() in {"1", "true", "yes", "on"}
+
+
+def argv_from_input_file(input_file):
+    """Translate an input file written by the GUI into wrapper CLI arguments."""
+    params = parse_input_file(input_file)
+    argv = []
+
+    for key, flag in WRAPPER_INPUT_KEYS:
+        value = params.get(key, "").strip()
+        if value:
+            argv.extend([flag, value])
+    if _is_enabled(params.get("apply_refine", "")):
+        argv.append("--apply-refine")
+
+    mesh_file = params.get("mesh_file", "").strip()
+    if mesh_file:
+        argv.append(mesh_file)
+    for key, flag, normalize in CLEAN_MESH_INPUT_KEYS:
+        value = params.get(key, "").strip()
+        if value:
+            argv.extend([flag, normalize(value)])
+    return argv
+
+
 def _build_parser():
     parser = argparse.ArgumentParser(
         description="Wrapper: optional blender refinement then run clean_mesh.py (no edits to originals)."
+    )
+    parser.add_argument(
+        "--input-file",
+        help="Parameter file with 'key = value' lines; overrides every other argument when given.",
     )
     # Arguments that control the wrapper / blender refinement
     parser.add_argument(
@@ -255,6 +323,8 @@ def _run_clean_mesh_or_exit(forwarded_args):
 def main():
     parser = _build_parser()
     args = parser.parse_args()
+    if args.input_file:
+        args = parser.parse_args(argv_from_input_file(args.input_file))
     input_path = _validate_clean_args(args.clean_args)
     try:
         forwarded_args, refined_temp = _refined_clean_args(args, input_path)

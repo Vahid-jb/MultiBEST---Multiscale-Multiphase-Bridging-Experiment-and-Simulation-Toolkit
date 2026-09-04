@@ -1,4 +1,8 @@
 #!/usr/bin/env python3
+# SPDX-FileCopyrightText: 2026 bright-ideas-clan
+#
+# SPDX-License-Identifier: GPL-3.0-or-later
+
 """Clear executable-stack flags from ELF program headers.
 
 Some Python distributions ship ``libpython`` with an executable ``GNU_STACK``

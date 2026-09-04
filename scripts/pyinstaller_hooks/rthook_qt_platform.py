@@ -1,3 +1,7 @@
+# SPDX-FileCopyrightText: 2026 bright-ideas-clan
+#
+# SPDX-License-Identifier: GPL-3.0-or-later
+
 """Configure Qt platform variables before GUI libraries are imported."""
 
 from __future__ import annotations

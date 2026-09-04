@@ -45,9 +45,9 @@ CONDA_RUNTIME_LIBRARIES = (
     # Qt minor version than PySide6's conda QtCore.
     "libQt6Concurrent.so.6",
     "libQt6Xml.so.6",
-    # DREAM3D-NX/SIMPLNX is built against conda-forge oneTBB. Other packages
-    # such as pymeshlab/open3d may contribute a same-named libtbb.so.12 that
-    # lacks required symbols, so force the root runtime to match the env.
+    # Several conda packages (pymeshlab/open3d/ovito) may contribute a
+    # same-named libtbb.so.12 that lacks required symbols, so force the root
+    # runtime to match the build environment.
     "libtbb.so.12",
     "libtbbmalloc.so.2",
     "libtbbmalloc_proxy.so.2",
@@ -97,33 +97,65 @@ CONDA_RUNTIME_LIBRARY_ALIASES = (
     ("libmkl_vml_avx512.so", "libmkl_vml_avx512.so.2"),
     ("libmkl_vml_def.so", "libmkl_vml_def.so.2"),
 )
-DREAM3DNX_PYTHON_MODULES = (
-    "simplnx",
-    "orientationanalysis",
-    "itkimageprocessing",
-)
-DREAM3DNX_RUNTIME_LIBRARIES = (
-    "libEbsdLib.so",
-    "libITKImageProcessing.simplnx",
-    "libmcplotty.so",
-    "libNXComponents.so",
-    "libNxQtADS.so.0.0.0",
-    "libNXVtkLib.so",
-    "libOrientationAnalysis.simplnx",
-    "libPLUSNative.so",
-    "libqmcplotty.so",
-    "libsimplnx.so",
-    "libSimplnxCore.simplnx",
-)
-DREAM3DNX_SHARE_TREES = (
-    "DREAM3DNX",
-    "simplnx",
-)
-DREAM3DNX_EXECUTABLES = (
-    "DREAM3DNX",
-    "dream3dnx",
-    "nxrunner",
-)
+# DREAM3D-NX is deliberately NOT collected. Its conda binaries are proprietary
+# (BlueQuartz EULA) and the simplnx sources are AGPL-3.0/commercial, so they
+# are not redistributable with this GPL bundle. The EBSD preparation scripts
+# below are shipped as plain source and executed by an external DREAM3D-NX
+# Python environment resolved at runtime (see multibest.utils.dream3d).
+EBSD_SOURCE_DIR = SRC / "multibest" / "ebsd_atomistic"
+EBSD_EXTERNAL_SOURCE_SCRIPTS = [
+    (str(EBSD_SOURCE_DIR / "EBSD_Atomistic.py"), "ebsd_atomistic"),
+    (str(EBSD_SOURCE_DIR / "EBSD_visualization.py"), "ebsd_atomistic"),
+]
+
+
+LFS_POINTER_MAGIC = b"version https://git-lfs.github.com/spec/v1"
+
+
+def _assert_no_lfs_pointers(directory: Path) -> None:
+    """Abort the build when Git LFS payloads have not been fetched.
+
+    ``examples/`` is bundled as data. An unfetched LFS file is a ~130-byte text
+    pointer, so without this check the bundle bundles placeholders in place of
+    the sample datasets and every example workflow fails on the user's machine
+    with a parse error. The build must not succeed quietly in that state.
+    """
+    pointers = sorted(
+        path
+        for path in directory.rglob("*")
+        if path.is_file() and path.stat().st_size < 1024 and path.read_bytes().startswith(LFS_POINTER_MAGIC)
+    )
+    if not pointers:
+        return
+
+    listed = "\n  ".join(str(path.relative_to(ROOT)) for path in pointers[:10])
+    more = "" if len(pointers) <= 10 else f"\n  ... and {len(pointers) - 10} more"
+    raise SystemExit(
+        f"release.spec: {len(pointers)} Git LFS pointer file(s) found instead of their payloads:\n"
+        f"  {listed}{more}\n"
+        "Run 'git lfs pull' before building the release bundle."
+    )
+
+
+def _assert_docs_site_is_complete(site: Path) -> None:
+    """Abort the build when the GUI help site has not been rendered.
+
+    Only the rendered ``*.html`` files are committed under ``docs_site/site``;
+    mkdocs-material's ``assets/`` stylesheets, scripts and fonts are generated.
+    Bundling the committed subset alone ships help pages that open unstyled in
+    the GUI's help viewer, so a stale site must fail the build rather than
+    reach users.
+    """
+    if not site.is_dir():
+        return
+    if (site / "assets").is_dir():
+        return
+
+    raise SystemExit(
+        f"release.spec: {site.relative_to(ROOT)} has no 'assets/' directory, so the GUI help"
+        "\npages would ship without their stylesheets and scripts.\n"
+        "Run 'just docs' (or 'just docs conda') before building the release bundle."
+    )
 
 
 def _existing_tree(path: str, dest: str):
@@ -133,7 +165,7 @@ def _existing_tree(path: str, dest: str):
     return []
 
 
-datas = []
+datas = [*EBSD_EXTERNAL_SOURCE_SCRIPTS]
 binaries = []
 hiddenimports = [
     "ase.io.cfg",
@@ -149,10 +181,8 @@ hiddenimports = [
     "PySide6.QtCore",
     "PySide6.QtGui",
     "PySide6.QtWidgets",
-    "itkimageprocessing",
     "matplotlib.backends.backend_qtagg",
     "numpy",
-    "orientationanalysis",
     "ovito._extensions.particles",
     "ovito._extensions.pyscript",
     "ovito.gui._create_qwidget",
@@ -162,7 +192,6 @@ hiddenimports = [
     "ovito.plugins",
     "ovito.plugins.ovito_bindings",
     "scipy",
-    "simplnx",
     "xtb",
     "xtb._libxtb",
     "xtb.ase",
@@ -192,14 +221,26 @@ EXCLUDED_HIDDENIMPORT_PARTS = {
 EXCLUDES = [
     "cupy",
     "dask",
-    "dash",
+    # dash and plotly are NOT excluded: open3d/__init__.py imports
+    # open3d.visualization unconditionally, whose __init__ imports draw_plotly,
+    # whose module-level imports are plotly.graph_objects and dash. Excluding
+    # either makes "import open3d" raise ModuleNotFoundError, which
+    # clean_mesh.smooth_open3d swallows as "Open3D not available for smoothing"
+    # while open3d's 217 MB still ships.
+    # "dash",
     "matplotlib.tests",
     "numba",
     "numpy.tests",
     "open3d.examples",
-    "open3d.ml",
+    # open3d.ml is NOT excluded: open3d/__init__.py imports it unconditionally.
+    # Only the web visualiser is dropped, which is the sole importer of IPython
+    # (and through it jedi, ~32 MB).
+    "open3d.web_visualizer",
+    "IPython",
+    "jedi",
+    "parso",
     "pandas.tests",
-    "plotly",
+    # "plotly",  — see the dash note above.
     "pytest",
     # sklearn is a required dependency of sevenn (scikit-learn is listed in
     # sevenn's package metadata).  Excluding it breaks SevenNet at runtime.
@@ -218,8 +259,10 @@ HEAVY_ML_EXCLUDES = [
 
 # User-facing files and optional generated documentation. Missing optional trees
 # are ignored so the same spec works before and after docs generation.
+_assert_docs_site_is_complete(ROOT / "docs_site" / "site")
 datas += _existing_tree("docs_site/site", "docs_site/site")
 datas += _existing_tree("docs", "docs")
+_assert_no_lfs_pointers(ROOT / "examples")
 datas += _existing_tree("examples", "examples")
 datas += _existing_tree("src/multibest/gui/assets", "multibest/gui/assets")
 
@@ -262,38 +305,6 @@ def collect_executable(executable_name: str, dest: str = ".") -> None:
         binaries.append((executable_path, dest))
 
 
-def collect_dream3dnx_runtime() -> None:
-    """Collect DREAM3D-NX/SIMPLNX native runtime files from the active conda env."""
-    global datas, binaries
-
-    for module_name in DREAM3DNX_PYTHON_MODULES:
-        try:
-            module_spec = importlib.util.find_spec(module_name)
-        except Exception:
-            module_spec = None
-
-        if module_spec and module_spec.origin:
-            module_path = Path(module_spec.origin)
-            if module_path.is_file():
-                collect_linked_conda_libraries(module_path)
-
-    conda_lib = Path(sys.prefix) / "lib"
-    if conda_lib.is_dir():
-        for library_name in DREAM3DNX_RUNTIME_LIBRARIES:
-            library_path = conda_lib / library_name
-            if library_path.is_file():
-                binaries.append((str(library_path), "."))
-
-    conda_share = Path(sys.prefix) / "share"
-    for share_tree in DREAM3DNX_SHARE_TREES:
-        share_path = conda_share / share_tree
-        if share_path.is_dir():
-            datas.append((str(share_path), f"share/{share_tree}"))
-
-    for executable_name in DREAM3DNX_EXECUTABLES:
-        collect_executable(executable_name, "bin")
-
-
 def collect_xtb_parameter_files() -> None:
     """Copy xTB runtime parameter data, including the external GFN0-xTB file."""
     executable_path = shutil.which("xtb")
@@ -309,6 +320,44 @@ def collect_xtb_parameter_files() -> None:
         if (candidate / "param_gfn0-xtb.txt").is_file():
             datas.append((str(candidate), "share/xtb"))
             return
+
+
+# Bundle-relative prefixes that must never be collected. Each is dead weight
+# large enough to matter against GitHub's 2 GB release-asset cap.
+COLLECTED_PATH_EXCLUDES = (
+    # open3d's wheel ships a CUDA pybind (~766 MB) beside the CPU one. Its
+    # __init__ probes for it and falls back to __DEVICE_API__ = "cpu" when it
+    # is missing, so the CPU module alone is a working open3d.
+    "open3d/cuda/",
+    # open3d's viewer resources (~37 MB) and notebook extensions. MultiBEST uses
+    # open3d only for TriangleMesh smoothing in clean_mesh.py, never its GUI.
+    # NOTE: open3d/ml and open3d/_ml3d must stay — open3d/__init__.py imports
+    # open3d.ml unconditionally, which imports open3d._ml3d.
+    "open3d/resources/",
+    "open3d/nbextension/",
+    "open3d/labextension/",
+    "open3d/examples/",
+    # torch's C++ test fixtures (~83 MB). NOTE: torch/bin must stay — torch's
+    # __init__ calls _manager_path(), which raises RuntimeError when
+    # torch/bin/torch_shm_manager is missing, so dropping it kills SevenNet.
+    "torch/test/",
+)
+
+
+def _is_excluded_collected_path(dest: str) -> bool:
+    normalized = str(dest).replace("\\", "/")
+    return any(normalized.startswith(prefix) or f"/{prefix}" in normalized for prefix in COLLECTED_PATH_EXCLUDES)
+
+
+def drop_excluded_collected_paths(analysis: Analysis) -> None:
+    """Remove COLLECTED_PATH_EXCLUDES entries from a finished analysis.
+
+    Applied to the analysis rather than to ``collect_package`` because most of
+    these arrive through PyInstaller's own package hooks, which run during
+    ``Analysis`` and never pass through this spec's collection helpers.
+    """
+    analysis.datas = [entry for entry in analysis.datas if not _is_excluded_collected_path(entry[0])]
+    analysis.binaries = [entry for entry in analysis.binaries if not _is_excluded_collected_path(entry[0])]
 
 
 def _binary_dest_name(entry) -> str | None:
@@ -425,10 +474,9 @@ for package in (
 
 # Optional scientific backends. These may not be installed in all build
 # environments, but when present they need their package metadata and data files.
-for package in ("sevenn", "xtb", *DREAM3DNX_PYTHON_MODULES):
+for package in ("sevenn", "xtb"):
     collect_package(package)
 
-collect_dream3dnx_runtime()
 collect_executable("xtb", "bin")
 collect_xtb_parameter_files()
 for library in CONDA_RUNTIME_LIBRARIES:
@@ -522,9 +570,14 @@ def make_analysis(
         optimize=0,
     )
     prefer_conda_runtime_libraries(analysis)
+    drop_excluded_collected_paths(analysis)
     return analysis
 
 
+# NOTE: strip is deliberately left off. Stripping saves ~450 MB but corrupts
+# scipy's vendored libscipy_openblas ("ELF load command address/offset not
+# page-aligned"), which kills every backend that imports scipy. PyInstaller's
+# strip flag is all-or-nothing, so the size has to come from elsewhere.
 def make_exe(
     name: str,
     script: str,
@@ -582,8 +635,6 @@ backend_specs = [
     ("stl_ebsd_rescale", "src/multibest/ebsd_atomistic/stl_ebsd_rescale.py", HEAVY_ML_EXCLUDES),
     ("ebsd_stl_fill_atoms", "src/multibest/ebsd_atomistic/ebsd_stl_fill_atoms.py", HEAVY_ML_EXCLUDES),
     ("replicate", "src/multibest/ebsd_atomistic/replicate.py", HEAVY_ML_EXCLUDES),
-    ("EBSD_Atomistic", "src/multibest/ebsd_atomistic/EBSD_Atomistic.py", HEAVY_ML_EXCLUDES),
-    ("EBSD_visualization", "src/multibest/ebsd_atomistic/EBSD_visualization.py", HEAVY_ML_EXCLUDES),
     ("gpt-mod-1", "src/multibest/mesh_to_atomistic/gpt-mod-1.py", HEAVY_ML_EXCLUDES),
     ("manipulate", "src/multibest/mesh_to_atomistic/manipulate.py", HEAVY_ML_EXCLUDES),
     ("Ovito_Delete_Robust", "src/multibest/mesh_to_atomistic/Ovito_Delete_Robust.py", HEAVY_ML_EXCLUDES),

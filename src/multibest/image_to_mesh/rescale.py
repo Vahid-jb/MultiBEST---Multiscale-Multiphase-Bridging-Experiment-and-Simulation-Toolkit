@@ -16,16 +16,55 @@ if sys.platform == "win32":
             stream.reconfigure(encoding="utf-8", errors="replace", line_buffering=True)
 
 
-def main():
+REQUIRED_ARGUMENTS = ("input_mesh", "scale_value", "output")
+
+# Input-file keys, each mapped onto the option of the same name. Keys listed in
+# MULTI_VALUE_INPUT_KEYS hold whitespace-separated values; the others are single
+# values kept whole, so paths may contain spaces.
+INPUT_FILE_KEYS = ("input_mesh", "scale_value", "displace", "rotate", "output")
+MULTI_VALUE_INPUT_KEYS = frozenset({"scale_value", "displace", "rotate"})
+
+
+def parse_input_file(input_file):
+    """Parse ``key = value`` parameters from an input text file."""
+    params = {}
+    with open(input_file, encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if not line or line.startswith("#"):
+                continue
+            if "=" in line:
+                key, value = line.split("=", 1)
+                params[key.strip()] = value.strip()
+    return params
+
+
+def argv_from_input_file(input_file):
+    """Translate an input file written by the GUI into CLI arguments."""
+    params = parse_input_file(input_file)
+    argv = []
+    for key in INPUT_FILE_KEYS:
+        value = params.get(key, "").strip()
+        if not value:
+            continue
+        argv.append(f"--{key}")
+        argv.extend(value.split() if key in MULTI_VALUE_INPUT_KEYS else [value])
+    return argv
+
+
+def _build_parser():
     parser = argparse.ArgumentParser(
         description="Transform a mesh with scaling, rotation, and displacement using PyMeshLab."
     )
-    parser.add_argument("--input_mesh", required=True, help="Input mesh file (e.g., .stl, .obj)")
+    parser.add_argument(
+        "--input-file",
+        help="Parameter file with 'key = value' lines; overrides every other argument when given.",
+    )
+    parser.add_argument("--input_mesh", help="Input mesh file (e.g., .stl, .obj)")
     parser.add_argument(
         "--scale_value",
         nargs=3,
         type=float,
-        required=True,
         help="Three scale factors for X, Y, Z axes (e.g., 50 50 300)",
     )
     parser.add_argument(
@@ -38,9 +77,24 @@ def main():
         default=None,
         help="Rotation angles: specify axis and angle pairs (e.g., --rotate x 25 y 36 z 69)",
     )
-    parser.add_argument("--output", required=True, help="Output mesh file (e.g., .obj, .stl)")
+    parser.add_argument("--output", help="Output mesh file (e.g., .obj, .stl)")
+    return parser
 
+
+def _parse_args():
+    parser = _build_parser()
     args = parser.parse_args()
+    if args.input_file:
+        args = parser.parse_args(argv_from_input_file(args.input_file))
+
+    missing = [f"--{name}" for name in REQUIRED_ARGUMENTS if getattr(args, name) is None]
+    if missing:
+        parser.error("the following arguments are required: " + ", ".join(missing))
+    return args
+
+
+def main():
+    args = _parse_args()
 
     if not os.path.exists(args.input_mesh):
         raise FileNotFoundError(f"Input file {args.input_mesh} not found.")
